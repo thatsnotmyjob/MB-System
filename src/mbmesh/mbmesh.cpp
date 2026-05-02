@@ -679,7 +679,6 @@ static int read_swath_file(int verbose, char *file, int format,
   return MB_SUCCESS;
 }
 
-/*--------------------------------------------------------------------*/
 /* PROCESS SINGLE PING */
 /*--------------------------------------------------------------------*/
 
@@ -689,13 +688,21 @@ static int read_swath_file(int verbose, char *file, int format,
  * This function extracts valid soundings from a ping and stores
  * them in the global all_soundings vector for later processing.
  *
+ * For each valid beam, computes the true geographic position by
+ * rotating the ship-frame (alongtrack, acrosstrack) offsets into
+ * earth-frame (north, east) meters using the ship's heading, then
+ * converting to degree offsets and adding to the ship's nav position.
+ *
  * @param verbose Verbosity level
  * @param beams_bath Number of bathymetry beams in ping
  * @param beamflag Quality flag array [beams_bath]
  * @param bath Depth array [beams_bath] (meters)
- * @param bathacrosstrack Across-track distance array [beams_bath] (meters)
- * @param bathalongtrack Along-track distance array [beams_bath] (meters)
+ * @param bathacrosstrack Across-track distance array [beams_bath] (meters, +starboard)
+ * @param bathalongtrack Along-track distance array [beams_bath] (meters, +forward)
  * @param time_d Timestamp (Unix seconds)
+ * @param nav_lon Ship longitude at ping time (degrees east)
+ * @param nav_lat Ship latitude at ping time (degrees north)
+ * @param heading Ship heading at ping time (degrees clockwise from north)
  * @return MB_SUCCESS
  */
 static int process_ping(int verbose, int beams_bath, char *beamflag,
