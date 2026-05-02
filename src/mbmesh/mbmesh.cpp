@@ -138,8 +138,8 @@ static int parse_options(int argc, char **argv);
 static int read_datalist_file(int verbose);
 static int read_swath_file(int verbose, char *file, int format, double file_weight);
 static int process_ping(int verbose, int beams_bath, char *beamflag,
-                       double *bath, double *bathlon, double *bathlat,
-                       double time_d);
+                        double *bath, double *bathacrosstrack, double *bathalongtrack,
+                        double time_d, double nav_lon, double nav_lat, double heading);
 static int write_xyz_file(const char *filename);
 static int write_projected_xyz_file(const char *filename);
 static int write_html_file(const char *filename, const char *glb_filename);
@@ -621,7 +621,8 @@ static int read_swath_file(int verbose, char *file, int format,
       data_records++;
       /* Process this ping */
       process_ping(verbose, beams_bath, beamflag,
-                  bath, bathacrosstrack, bathalongtrack, time_d);
+                 bath, bathacrosstrack, bathalongtrack, time_d,
+                 navlon, navlat, heading);
 
       /* Update global counter */
       npings++;
@@ -698,47 +699,51 @@ static int read_swath_file(int verbose, char *file, int format,
  * @return MB_SUCCESS
  */
 static int process_ping(int verbose, int beams_bath, char *beamflag,
-                       double *bath, double *bathacrosstrack, double *bathalongtrack,
-                       double time_d) {
+                        double *bath, double *bathacrosstrack, double *bathalongtrack,
+                        double time_d, double nav_lon, double nav_lat, double heading) {
+    // Precompute heading rotation (heading is degrees clockwise from north)
+    const double heading_rad = heading * M_PI / 180.0;
+    const double sin_h = sin(heading_rad);
+    const double cos_h = cos(heading_rad);
 
-  // Process each beam in the ping
-   
-   // Loop through all beams and extract valid soundings.
-   // Calculate longitude and latitude from acrosstrack and alongtrack distances.
-   
+    // Meters per degree at this ping's latitude
+    const double m_per_deg_lat = 111132.0;
+    const double m_per_deg_lon = 111132.0 * cos(nav_lat * M_PI / 180.0);
+
     for (int i = 0; i < beams_bath; i++) {
-      // Count total beams
-      nbeams_total++;
-   
-      // Check beam quality
-      if (!mb_beam_ok(beamflag[i])) {
-        nbeams_flagged++;
-        continue;  // Skip bad beam
-      }
-   
-      // Create sounding
-      Sounding s;
-      s.longitude = bathacrosstrack[i];
-      s.latitude = bathalongtrack[i];
-      s.depth = bath[i];
-      s.beamflag = beamflag[i];
-      s.beam_number = i;
-      s.time_d = time_d;
-   
-      // Filter by geographic bounds if specified
-      if (bounds_specified) {
-        if (s.longitude < bounds[0] || s.longitude > bounds[1] ||
-            s.latitude < bounds[2] || s.latitude > bounds[3]) {
-          continue;  // Outside bounds, skip
+        nbeams_total++;
+
+        if (!mb_beam_ok(beamflag[i])) {
+            nbeams_flagged++;
+            continue;
         }
-      }
-   
-      // Add to collection
-      all_soundings.push_back(s);
-      nbeams_good++;
+
+        // Rotate ship-frame (alongtrack=fwd, acrosstrack=starboard) into earth-frame (north, east)
+        const double dE = bathalongtrack[i] * sin_h + bathacrosstrack[i] * cos_h;
+        const double dN = bathalongtrack[i] * cos_h - bathacrosstrack[i] * sin_h;
+
+        // Convert meter offsets to degree offsets and add to ship's nav position
+        Sounding s;
+        s.longitude  = nav_lon + dE / m_per_deg_lon;
+        s.latitude   = nav_lat + dN / m_per_deg_lat;
+        s.depth      = bath[i];
+        s.beamflag   = beamflag[i];
+        s.beam_number = i;
+        s.time_d     = time_d;
+
+        // Filter by geographic bounds if specified
+        if (bounds_specified) {
+            if (s.longitude < bounds[0] || s.longitude > bounds[1] ||
+                s.latitude  < bounds[2] || s.latitude  > bounds[3]) {
+                continue;
+            }
+        }
+
+        all_soundings.push_back(s);
+        nbeams_good++;
     }
-   
-  return MB_SUCCESS;
+
+    return MB_SUCCESS;
 }
 
 /*--------------------------------------------------------------------*/
